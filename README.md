@@ -1,151 +1,100 @@
-# WildGuard
+# auth-service
 
-Smart Wildlife Conservation & Protected Area Management: an enterprise web application that helps wildlife authorities manage animal records, protected areas, patrols, incidents, rescues, field resources and conservation programmes.
+Logs users in and issues the JWT that every other service trusts. Also lets an administrator manage user accounts and roles.
 
-Built as standalone Spring Boot microservices behind a Spring Cloud Gateway, with a React + TypeScript frontend and one PostgreSQL database per service.
-
-**Read [`CONTRACTS.md`](CONTRACTS.md) before writing any code.** It defines every port, endpoint, DTO, enum, role and environment variable. If you need to change a contract, change that file first in the same pull request.
-
-## Services
-
-| Service | Port | Database | Owner |
-|---|---|---|---|
-| api-gateway | 8080 | none | Team Lead |
-| auth-service | 8081 | auth_db | Member 5 |
-| habitat-service | 8082 | habitat_db | Member 2 |
-| wildlife-service | 8083 | wildlife_db | Member 2 |
-| resource-service | 8084 | resource_db | Member 3 |
-| patrol-service | 8085 | patrol_db | Member 3 |
-| incident-service | 8086 | incident_db | Member 4 |
-| rescue-service | 8087 | rescue_db | Member 4 |
-| programme-service | 8088 | programme_db | Member 5 |
-| reporting-service | 8089 | none | Member 5 |
-| frontend | 5173 | none | Team Lead |
-
-```
- Browser ──► frontend (Vite, 5173)
-                │  all API calls
-                ▼
-          api-gateway (8080)  ── checks JWT, routes by path
-                │
-   ┌──────┬─────┼──────┬────────┬─────────┬────────┬──────────┬──────────┐
-  auth habitat wildlife resource patrol  incident  rescue  programme  reporting
-  8081  8082    8083     8084    8085     8086     8087     8088       8089
-   │     │       │        │       │        │        │        │       (calls the
-   └─────┴───────┴────────┴───────┴────────┴────────┴────────┘        others'
-                 PostgreSQL 16 (docker), one DB per service           /summary)
-```
-
-Services call each other directly with OpenFeign (URLs from environment variables), forwarding the user's JWT. If another service is down, the caller still answers and adds a `warnings` entry.
-
-## Prerequisites
-
-- JDK 17+ (`java -version`)
-- Maven 3.9+ (`mvn -v`)
-- Docker Desktop (for PostgreSQL)
-- Node.js 20+ and npm (frontend only)
-
-## First-time setup
-
-```bash
-# 1. Environment
-cp .env.example .env
-#    edit .env and set JWT_SECRET to a random string of at least 32 characters
-
-# 2. Database (creates all 8 databases on first start)
-docker compose up -d
-docker compose ps          # wait until postgres shows "healthy"
-```
-
-### Making the variables visible to Spring Boot
-
-Spring Boot does not read `.env`. Before starting a service, export the variables in that terminal:
-
-```bash
-# macOS / Linux / Git Bash
-set -a; source .env; set +a
-```
-
-```powershell
-# Windows PowerShell (run from the repo root)
-Get-Content .env | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object {
-  $name, $value = $_ -split '=', 2; [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim(), 'Process')
-}
-```
-
-In IntelliJ IDEA, add the variables to each run configuration instead (Run → Edit Configurations → Environment variables). The EnvFile plugin can load `.env` directly.
-
-Every value except `JWT_SECRET` has a default that works locally, so in practice you only must set `JWT_SECRET`.
-
-## Running
-
-Start PostgreSQL, then the services, then the frontend. Order of services doesn't matter for start-up (none calls another while starting), but features that call other services need them running.
-
-```bash
-cd auth-service && mvn spring-boot:run          # repeat for each service, one terminal each
-cd frontend && npm install && npm run dev        # http://localhost:5173
-```
-
-Service-specific instructions are in each service's own `README.md`. The full start order, who owns which zip, and the Git workflow are in [`TEAM-GUIDE.md`](TEAM-GUIDE.md).
-
-### Dev logins
-
-| Username | Password | Role |
-|---|---|---|
-| admin | Admin@123 | ADMIN |
-| officer | Officer@123 | FOREST_OFFICER |
-| ranger | Ranger@123 | RANGER |
-| vet | Vet@123 | VET |
-| analyst | Analyst@123 | ANALYST |
-
-These are development credentials seeded by auth-service. Change or remove them before any real deployment.
-
-## Useful URLs (once running)
-
-| What | URL |
+| | |
 |---|---|
-| App | http://localhost:5173 |
-| Gateway | http://localhost:8080 |
-| Service health through gateway | http://localhost:8080/api/gateway/health |
-| API docs for a service | `http://localhost:<port>/swagger-ui.html` |
+| Owner | Member 5 |
+| Port | 8081 |
+| Database | auth_db |
+| Package | `com.wildlife.auth` |
+| Calls | nothing |
+| Called by | the gateway only (other services never call it; they validate the token themselves) |
 
-To call an API by hand, log in first and pass the token:
+## Run it
 
-```bash
-TOKEN=$(curl -s -X POST localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"officer","password":"Officer@123"}' | sed -E 's/.*"accessToken":"([^"]+)".*/\1/')
-
-curl -H "Authorization: Bearer $TOKEN" "localhost:8080/api/incidents/zone/1/current-month"
-```
-
-## Database tools
+1. Start PostgreSQL from the repo root: `docker compose up -d` (creates `auth_db` on first start).
+2. Export the environment (from the repo root): `set -a; source .env; set +a`. Only `JWT_SECRET` is mandatory, everything else has a working local default.
+3. Start the service:
 
 ```bash
-docker exec -it wildguard-postgres psql -U wildguard -d incident_db    # open a SQL shell
-docker compose down -v && docker compose up -d                         # wipe everything and start fresh
+cd auth-service
+mvn spring-boot:run
 ```
 
-If you change a service's `V1__init.sql` after it has already run, Flyway will refuse to start (checksum mismatch). During development, either add a new `V2__...sql` migration or wipe that service's database:
+On start-up Flyway runs `src/main/resources/db/migration/V1__init.sql`, which creates the tables and loads demo data. Hibernate then only *validates* the schema (`ddl-auto: validate`), so the SQL file is the single source of truth for tables.
+
+- Health: http://localhost:8081/actuator/health
+- API docs (Swagger UI): http://localhost:8081/swagger-ui.html
+- Through the gateway every path below is also reachable at `http://localhost:8080<path>`.
+
+## Environment variables
+
+| Variable | Default | Notes |
+|---|---|---|
+| `APP_TIMEZONE` | `Asia/Kolkata` | Decides what "today" and "this month" mean |
+| `DB_HOST` | `localhost` |  |
+| `DB_NAME` | `auth_db` | This service's own database |
+| `DB_PASSWORD` | `wildguard` |  |
+| `DB_PORT` | `5432` |  |
+| `DB_USERNAME` | `wildguard` |  |
+| `JWT_EXPIRATION_MINUTES` | `120` | How long a login lasts |
+| `JWT_SECRET` | `*(none)*` | **Required.** Same value as every other service, at least 32 characters. |
+| `SERVER_PORT` | `8081` | HTTP port |
+
+## Endpoints
+
+Every path except `POST /api/auth/login` needs `Authorization: Bearer <token>`. Full request and response shapes are in CONTRACTS.md section 7 and in Swagger UI.
+
+| Method | Path | Who can call it |
+|---|---|---|
+| POST | `/api/auth/login` | Public |
+| GET | `/api/auth/me` | Any logged-in user |
+| POST | `/api/auth/change-password` | Any logged-in user |
+| GET | `/api/users` | ADMIN |
+| GET | `/api/users/{id}` | ADMIN |
+| POST | `/api/users` | ADMIN |
+| PUT | `/api/users/{id}` | ADMIN |
+| PATCH | `/api/users/{id}/active` | ADMIN |
+| PUT | `/api/users/{id}/password` | ADMIN |
+
+## Business rules
+
+- Passwords are stored as BCrypt hashes (strength 10). Plain passwords are never logged or returned.
+- Tokens are HS256, signed with `JWT_SECRET`, issuer `wildguard-auth`. Claims: `sub` (username), `uid`, `name`, `roles[]`, `staffId`, `iat`, `exp` (CONTRACTS.md section 3).
+- Wrong username and wrong password give the same message ("Invalid username or password"), so the API does not reveal which usernames exist.
+- A deactivated user cannot log in. Admins cannot deactivate themselves.
+- Usernames are unique (case-insensitive). Passwords must be at least 8 characters.
+- Roles: `ADMIN`, `FOREST_OFFICER`, `RANGER`, `VET`, `ANALYST`. `staffId` links a login to a staff record in resource-service.
+
+## Demo data (V1__init.sql)
+
+Five development users (table `app_users`): admin / Admin@123, officer / Officer@123 (staffId 1), ranger / Ranger@123 (staffId 2), vet / Vet@123 (staffId 4), analyst / Analyst@123. Change these before any real deployment.
+
+## Code layout
+
+```
+src/main/java/com/wildlife/auth/
+├── controller/   REST endpoints only: validate input, call a service, return a DTO
+├── service/      business rules (start reading here)
+├── repository/   Spring Data JPA interfaces
+├── entity/       JPA entities and enums (match V1__init.sql)
+├── dto/          request/response records exactly as in CONTRACTS.md
+
+├── config/       security (JWT filter), OpenAPI, clock
+└── exception/    error types and the handler that produces the standard error body
+```
+
+Errors always come back as `{timestamp, status, error, message, path, details[]}`. List endpoints are paginated with `?page=0&size=20&sort=field,asc` (max size 100) and return `{content, page, size, totalElements, totalPages}`.
+
+## Tests
 
 ```bash
-docker exec -it wildguard-postgres psql -U wildguard -d postgres \
-  -c "DROP DATABASE incident_db;" -c "CREATE DATABASE incident_db;"
+cd auth-service
+mvn test
 ```
 
-## Repository layout
+Unit tests use JUnit 5 and Mockito only. They need no database and no other service running.
 
-```
-wildguard/
-├── CONTRACTS.md          single source of truth for all APIs
-├── TEAM-GUIDE.md         who owns what, start order, Git workflow
-├── README.md
-├── docker-compose.yml    PostgreSQL only
-├── docker/postgres/init/ creates the 8 databases
-├── .env.example
-├── api-gateway/  auth-service/  habitat-service/  wildlife-service/  resource-service/
-├── patrol-service/  incident-service/  rescue-service/  programme-service/  reporting-service/
-└── frontend/
-```
-
-Each service folder is a standalone Maven project with no shared parent POM or shared library, so it builds on its own.
+- **AuthServiceTest**: correct password returns token and records login; wrong password is rejected with generic message; inactive user cannot log in; unknown user gets same message
+- **TokenRoundTripTest**: issued token carries contract claims; staff id is null when user has no staff link; expired token is rejected; token signed with another secret is rejected; short secret is refused
