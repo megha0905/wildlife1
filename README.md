@@ -77,7 +77,18 @@ In IntelliJ IDEA, add the variables to each run configuration instead (Run → E
 
 Every value except `JWT_SECRET` has a default that works locally, so in practice you only must set `JWT_SECRET`.
 
-## Running
+## Running in GitHub Codespaces (nothing to install)
+
+1. On GitHub: **Code → Codespaces → ⋯ → New with options**, pick the **4-core** machine, **Create codespace**.
+2. In the codespace, open `.env` (created automatically) and set `JWT_SECRET` to any random text of 32+ characters.
+3. Terminal: `bash start-all.sh` (PostgreSQL + all 10 backend apps in the background; first start takes 5–10 minutes).
+4. `bash status.sh` until every service is UP. If one stays DOWN, read `logs/<service>.log`.
+5. New terminal: `cd frontend && npm install && npm run dev`, then open port 5173 from the **Ports** tab.
+6. When finished: `bash stop-all.sh`, then stop the codespace so it doesn't use up your free hours.
+
+In Codespaces the frontend calls `/api` on its own address and Vite forwards it to the gateway (`frontend/vite.config.ts`), so only port 5173 has to be opened.
+
+## Running on your own computer
 
 Start PostgreSQL, then the services, then the frontend. Order of services doesn't matter for start-up (none calls another while starting), but features that call other services need them running.
 
