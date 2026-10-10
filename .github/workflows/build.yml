@@ -1,0 +1,42 @@
+# Builds and tests every WildGuard module on each push and pull request.
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api-gateway, auth-service, habitat-service, wildlife-service, resource-service,
+                  patrol-service, incident-service, rescue-service, programme-service, reporting-service]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: ${{ matrix.service }}/pom.xml
+      - name: mvn verify
+        working-directory: ${{ matrix.service }}
+        run: mvn -B -ntp verify
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: install and build
+        working-directory: frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
