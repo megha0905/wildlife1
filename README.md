@@ -1,151 +1,84 @@
-# WildGuard
+# reporting-service
 
-Smart Wildlife Conservation & Protected Area Management: an enterprise web application that helps wildlife authorities manage animal records, protected areas, patrols, incidents, rescues, field resources and conservation programmes.
+Builds the dashboard and cross-service reports by calling the other services' summary endpoints. It has no database of its own.
 
-Built as standalone Spring Boot microservices behind a Spring Cloud Gateway, with a React + TypeScript frontend and one PostgreSQL database per service.
-
-**Read [`CONTRACTS.md`](CONTRACTS.md) before writing any code.** It defines every port, endpoint, DTO, enum, role and environment variable. If you need to change a contract, change that file first in the same pull request.
-
-## Services
-
-| Service | Port | Database | Owner |
-|---|---|---|---|
-| api-gateway | 8080 | none | Team Lead |
-| auth-service | 8081 | auth_db | Member 5 |
-| habitat-service | 8082 | habitat_db | Member 2 |
-| wildlife-service | 8083 | wildlife_db | Member 2 |
-| resource-service | 8084 | resource_db | Member 3 |
-| patrol-service | 8085 | patrol_db | Member 3 |
-| incident-service | 8086 | incident_db | Member 4 |
-| rescue-service | 8087 | rescue_db | Member 4 |
-| programme-service | 8088 | programme_db | Member 5 |
-| reporting-service | 8089 | none | Member 5 |
-| frontend | 5173 | none | Team Lead |
-
-```
- Browser ──► frontend (Vite, 5173)
-                │  all API calls
-                ▼
-          api-gateway (8080)  ── checks JWT, routes by path
-                │
-   ┌──────┬─────┼──────┬────────┬─────────┬────────┬──────────┬──────────┐
-  auth habitat wildlife resource patrol  incident  rescue  programme  reporting
-  8081  8082    8083     8084    8085     8086     8087     8088       8089
-   │     │       │        │       │        │        │        │       (calls the
-   └─────┴───────┴────────┴───────┴────────┴────────┴────────┘        others'
-                 PostgreSQL 16 (docker), one DB per service           /summary)
-```
-
-Services call each other directly with OpenFeign (URLs from environment variables), forwarding the user's JWT. If another service is down, the caller still answers and adds a `warnings` entry.
-
-## Prerequisites
-
-- JDK 17+ (`java -version`)
-- Maven 3.9+ (`mvn -v`)
-- Docker Desktop (for PostgreSQL)
-- Node.js 20+ and npm (frontend only)
-
-## First-time setup
-
-```bash
-# 1. Environment
-cp .env.example .env
-#    edit .env and set JWT_SECRET to a random string of at least 32 characters
-
-# 2. Database (creates all 8 databases on first start)
-docker compose up -d
-docker compose ps          # wait until postgres shows "healthy"
-```
-
-### Making the variables visible to Spring Boot
-
-Spring Boot does not read `.env`. Before starting a service, export the variables in that terminal:
-
-```bash
-# macOS / Linux / Git Bash
-set -a; source .env; set +a
-```
-
-```powershell
-# Windows PowerShell (run from the repo root)
-Get-Content .env | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object {
-  $name, $value = $_ -split '=', 2; [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim(), 'Process')
-}
-```
-
-In IntelliJ IDEA, add the variables to each run configuration instead (Run → Edit Configurations → Environment variables). The EnvFile plugin can load `.env` directly.
-
-Every value except `JWT_SECRET` has a default that works locally, so in practice you only must set `JWT_SECRET`.
-
-## Running
-
-Start PostgreSQL, then the services, then the frontend. Order of services doesn't matter for start-up (none calls another while starting), but features that call other services need them running.
-
-```bash
-cd auth-service && mvn spring-boot:run          # repeat for each service, one terminal each
-cd frontend && npm install && npm run dev        # http://localhost:5173
-```
-
-Service-specific instructions are in each service's own `README.md`. The full start order, who owns which zip, and the Git workflow are in [`TEAM-GUIDE.md`](TEAM-GUIDE.md).
-
-### Dev logins
-
-| Username | Password | Role |
-|---|---|---|
-| admin | Admin@123 | ADMIN |
-| officer | Officer@123 | FOREST_OFFICER |
-| ranger | Ranger@123 | RANGER |
-| vet | Vet@123 | VET |
-| analyst | Analyst@123 | ANALYST |
-
-These are development credentials seeded by auth-service. Change or remove them before any real deployment.
-
-## Useful URLs (once running)
-
-| What | URL |
+| | |
 |---|---|
-| App | http://localhost:5173 |
-| Gateway | http://localhost:8080 |
-| Service health through gateway | http://localhost:8080/api/gateway/health |
-| API docs for a service | `http://localhost:<port>/swagger-ui.html` |
+| Owner | Member 5 |
+| Port | 8089 |
+| Database | none |
+| Package | `com.wildlife.reporting` |
+| Calls | habitat, wildlife, resource, patrol, incident, rescue, programme (their `/summary` and report endpoints) |
+| Called by | the gateway only |
 
-To call an API by hand, log in first and pass the token:
+## Run it
 
-```bash
-TOKEN=$(curl -s -X POST localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"officer","password":"Officer@123"}' | sed -E 's/.*"accessToken":"([^"]+)".*/\1/')
-
-curl -H "Authorization: Bearer $TOKEN" "localhost:8080/api/incidents/zone/1/current-month"
-```
-
-## Database tools
+1. Export the environment from the repo root: `set -a; source .env; set +a` (only `JWT_SECRET` is mandatory).
+2. Start it:
 
 ```bash
-docker exec -it wildguard-postgres psql -U wildguard -d incident_db    # open a SQL shell
-docker compose down -v && docker compose up -d                         # wipe everything and start fresh
+cd reporting-service
+mvn spring-boot:run
 ```
 
-If you change a service's `V1__init.sql` after it has already run, Flyway will refuse to start (checksum mismatch). During development, either add a new `V2__...sql` migration or wipe that service's database:
+- Health: http://localhost:8089/actuator/health
+- API docs (Swagger UI): http://localhost:8089/swagger-ui.html
+
+## Environment variables
+
+| Variable | Default | Notes |
+|---|---|---|
+| `APP_TIMEZONE` | `Asia/Kolkata` | Decides what "today" and "this month" mean |
+| `HABITAT_SERVICE_URL` | `http://localhost:8082` | base url of habitat-service |
+| `INCIDENT_SERVICE_URL` | `http://localhost:8086` | base url of incident-service |
+| `JWT_SECRET` | `*(none)*` | **Required.** Same value as every other service, at least 32 characters. |
+| `PATROL_SERVICE_URL` | `http://localhost:8085` | base url of patrol-service |
+| `PROGRAMME_SERVICE_URL` | `http://localhost:8088` | base url of programme-service |
+| `RESCUE_SERVICE_URL` | `http://localhost:8087` | base url of rescue-service |
+| `RESOURCE_SERVICE_URL` | `http://localhost:8084` | base url of resource-service |
+| `SERVER_PORT` | `8089` | HTTP port |
+| `WILDLIFE_SERVICE_URL` | `http://localhost:8083` | base url of wildlife-service |
+
+## Endpoints
+
+Every path except `POST /api/auth/login` needs `Authorization: Bearer <token>`. Full request and response shapes are in CONTRACTS.md section 7 and in Swagger UI.
+
+| Method | Path | Who can call it |
+|---|---|---|
+| GET | `/api/reports/dashboard` | Any logged-in user |
+| GET | `/api/reports/incidents/monthly` | Any logged-in user |
+| GET | `/api/reports/zones/{zoneId}` | Any logged-in user |
+
+## Business rules
+
+- Each section of the dashboard comes from one service and is passed through unchanged (as JSON). If a service is down its section is `null`, `servicesOnline` shows it as `false` and `warnings` explains, while the rest of the dashboard still loads.
+- `/api/reports/incidents/monthly?year=&month=` returns incident-service's monthly summary plus a `warnings` array.
+- `/api/reports/zones/{zoneId}` combines the zone (habitat), the number of animals in it (wildlife), this month's incidents (incident) and its water resources (habitat).
+- The user's token is forwarded on every call, so the user only sees what they're allowed to see.
+
+## Code layout
+
+```
+src/main/java/com/wildlife/reporting/
+├── controller/   REST endpoints only: validate input, call a service, return a DTO
+├── service/      business rules (start reading here)
+├── repository/   Spring Data JPA interfaces
+├── entity/       JPA entities and enums (match V1__init.sql)
+├── dto/          request/response records exactly as in CONTRACTS.md
+├── client/       OpenFeign clients for other services, plus their DTOs
+├── config/       security (JWT filter), OpenAPI, clock, Feign token forwarding
+└── exception/    error types and the handler that produces the standard error body
+```
+
+Errors always come back as `{timestamp, status, error, message, path, details[]}`. List endpoints are paginated with `?page=0&size=20&sort=field,asc` (max size 100) and return `{content, page, size, totalElements, totalPages}`.
+
+## Tests
 
 ```bash
-docker exec -it wildguard-postgres psql -U wildguard -d postgres \
-  -c "DROP DATABASE incident_db;" -c "CREATE DATABASE incident_db;"
+cd reporting-service
+mvn test
 ```
 
-## Repository layout
+Unit tests use JUnit 5 and Mockito only. They need no database and no other service running.
 
-```
-wildguard/
-├── CONTRACTS.md          single source of truth for all APIs
-├── TEAM-GUIDE.md         who owns what, start order, Git workflow
-├── README.md
-├── docker-compose.yml    PostgreSQL only
-├── docker/postgres/init/ creates the 8 databases
-├── .env.example
-├── api-gateway/  auth-service/  habitat-service/  wildlife-service/  resource-service/
-├── patrol-service/  incident-service/  rescue-service/  programme-service/  reporting-service/
-└── frontend/
-```
-
-Each service folder is a standalone Maven project with no shared parent POM or shared library, so it builds on its own.
+- **ReportServiceTest**: dashboard keeps working when one service is down; monthly incidents adds a warnings array; zone report reads totals from pages
